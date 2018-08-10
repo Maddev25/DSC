@@ -1,0 +1,20 @@
+---
+title: "About - Swiftkey Mini Application"
+author: "Vasudevan Durairaj"
+date: "August 09, 2018"
+output: html_document
+---
+This Shiny Application (miniature of Swiftkey application) was developed as part of Coursera Data Science Capstone Course. The goal of the project was to build a predictive text model from the given HC Corpora dataset combined with a shiny app UI that will predict the next word as the user types a sentence similar to the way most smart phone keyboards are implemented today using the technology of Swiftkey. Scope of the prediction is limited as it not context related above last four words in the sentence which can be further enhanced. 
+
+##Input 
+On launch of the application,"NULL" string will be displayed at the Predicted Next Word textbox.User may then enter a partially complete sentence to begin the next word prediction.
+
+##Output 
+Next word predicted is shown at the Predicted Next Word textbox. Information on the n-gram backoff algorithm used to predict is also shown as indication.
+
+##References
+Source Code Repository in Github accessible through following link
+<https://github.com/Maddev25/DSC.git>
+
+Presentation Slide decks in Rpubs accesible through following link 
+<http://rpubs.com/Maddev/swiftkeymini>
