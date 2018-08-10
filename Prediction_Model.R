@@ -1,0 +1,190 @@
+## Filename     Prediction_Model.R 
+## Desc         Text Mining Prediction Model using N-grams 
+## Author       Vasudevan D 
+## Date         07 August 2018 
+
+## Flushing memory 
+rm(list=ls())
+
+# Load required R librabires
+suppressMessages(library(tm))
+suppressMessages(library(ggplot2))
+suppressMessages(library(RWeka))
+suppressMessages(library(R.utils))
+suppressMessages(library(dplyr))
+suppressMessages(library(parallel))
+suppressMessages(library(wordcloud))
+suppressMessages(library(ngram))
+suppressMessages(library(NLP))
+suppressMessages(library(openNLP))
+suppressMessages(library(qdapDictionaries))
+suppressMessages(library(qdap))
+suppressMessages(library(qdapRegex))
+suppressMessages(library(qdapTools))
+suppressMessages(library(slam))
+suppressMessages(library(stringr))
+
+## Read HC Corpora Daa set 
+## Set the line count information for extraction 
+linesToExtract <- 50000 ## sampled 50000 lines from each file 
+
+## Open the file connection 
+blogsC <- file("./final/en_US/en_US.blogs.txt", "r")
+newsC  <- file("./final/en_US/en_US.news.txt", "r")
+twitterC <- file("./final/en_US/en_US.twitter.txt", "r")
+
+blogsS <- readLines(blogsC, n=linesToExtract, encoding = "UTF-8")
+newsS  <- readLines(newsC, n= linesToExtract, encoding = "UTF-8")
+twitterS <- readLines(twitterC, n=linesToExtract, encoding = "UTF-8")
+
+## Close the file connection
+close(blogsC)
+close(newsC)
+close(twitterC)
+
+##Data Cleaning
+## Remove retweets from Twitter Data Sample 
+twitterS <- gsub ("(RT|via)((?:\\b\\W*@\\w+)+)", "", twitterS)
+
+## Remove @people names from Twitter 
+twitterS <- gsub("@\\w+", "",twitterS)
+
+## Collate text data from different file samples 
+sampleData <- c(blogsS, newsS, twitterS)
+
+## Replace abbreviation so that the sentences are not split at incorrect places
+sampleData <- replace_abbreviation(sampleData)
+
+## Collate Sample Text Data and create a reduced raw data file 
+sampleDF<- data.frame(text = sampleData)
+
+## Create Text Corpus for processing 
+sampleCorpora <- VCorpus(VectorSource(sampleDF))
+
+## Release object memory 
+rm(blogsS, newsS, twitterS)
+rm(sampleDF,sampleData)
+
+## convert the text to lower case 
+sampleCorpora <- tm_map(sampleCorpora,content_transformer(tolower))
+
+## Remove URL from Corpora
+removeOnlineJunk <- function(x) {
+    # replace emails and such but space
+    x <- gsub("[^ ]{1,}@[^ ]{1,}"," ",x)
+    x <- gsub(" @[^ ]{1,}"," ",x)
+    # hashtags
+    x <- gsub("#[^ ]{1,}"," ",x) 
+    # websites and file systems
+    x <- gsub("[^ ]{1,}://[^ ]{1,}"," ",x)
+}
+sampleCorpora <- tm_map(sampleCorpora,content_transformer(removeOnlineJunk))
+
+## Remove symbols
+removeSymbols <- function(x){
+    # Edit out most non-alphabetical character
+    # text must be lower case first
+    x <- gsub("[`'']","'",x)
+    x <- gsub("[^a-z']"," ",x)
+    x <- gsub("'{2,}"," '",x)
+    x <- gsub("' "," ",x)
+    x <- gsub(" '"," ",x)
+    x <- gsub(","," ",x)
+    x <- gsub("^'","",x)
+    x <- gsub("'$","",x)
+    x
+}
+sampleCorpora <- tm_map(sampleCorpora,content_transformer(removeSymbols))
+
+#remove the punctuations after trimming leading & trailing white spaces 
+sampleCorpora <- tm_map(sampleCorpora, content_transformer(removePunctuation))
+
+## remove numbers from the text 
+sampleCorpora <- tm_map(sampleCorpora, content_transformer(removeNumbers))
+
+## Build profane word list 
+profanityFileName = "profanity.txt"
+if (!file.exists(profanityFileName)) 
+    download.file(url =  "http://www.cs.cmu.edu/~biglou/resources/bad-words.txt",destfile = profanityFileName)
+profC <- file("./profanity.txt", "r")
+profanityL<- readLines(profC, n=-1,encoding = "UTF-8")
+close(profC)
+
+## Remove profane words from the corpora 
+sampleCorpora <- tm_map(sampleCorpora, removeWords, profanityL)
+
+## Finally remove all the white space that was created by the removals
+sampleCorpora <- tm_map(sampleCorpora,content_transformer(stripWhitespace))
+
+## Release Object Memory 
+rm(blogsC,newsC, twitterC)
+
+# Define function to make N grams
+tdm_Ngram <- function (textcp, n) {
+    NgramTokenizer <- function(x) {RWeka::NGramTokenizer(x, RWeka::Weka_control(min = n, max = n))}
+    tdm_ngram <- TermDocumentMatrix(textcp, control = list(tokenizer = NgramTokenizer))
+    tdm_ngram
+}
+
+# Define function to extract the N grams and sort
+ngram_sorted_df <- function (tdm_ngram) {
+    tdm_ngram_m <- as.matrix(tdm_ngram)
+    tdm_ngram_df <- as.data.frame(tdm_ngram_m)
+    colnames(tdm_ngram_df) <- "Count"
+    tdm_ngram_df <- tdm_ngram_df[order(-tdm_ngram_df$Count), , drop = FALSE]
+    tdm_ngram_df
+}
+
+## Calcuate N-grams 
+tdm_2gram <- tdm_Ngram(sampleCorpora, 2)
+tdm_3gram <- tdm_Ngram(sampleCorpora, 3)
+tdm_4gram <- tdm_Ngram(sampleCorpora, 4)
+
+## Release object memory 
+rm(sampleCorpora)
+
+# Extract term-count tables from N-Grams and sort 
+tdm_2gram_df <- ngram_sorted_df(tdm_2gram)
+tdm_3gram_df <- ngram_sorted_df(tdm_3gram)
+tdm_4gram_df <- ngram_sorted_df(tdm_4gram)
+
+## Release object memory 
+rm(tdm_2gram,tdm_3gram,tdm_4gram)
+
+# Save data frames into r-compressed files
+quadgram <- data.frame(rows=rownames(tdm_4gram_df),count=tdm_4gram_df$Count)
+quadgram$rows <- as.character(quadgram$rows)
+quadgram_split <- strsplit(as.character(quadgram$rows),split=" ")
+quadgram <- transform(quadgram,first = sapply(quadgram_split,"[[",1),second = sapply(quadgram_split,"[[",2),third = sapply(quadgram_split,"[[",3), fourth = sapply(quadgram_split,"[[",4))
+quadgram <- data.frame(unigram = quadgram$first,bigram = quadgram$second, trigram = quadgram$third, quadgram = quadgram$fourth, freq = quadgram$count,stringsAsFactors=FALSE)
+write.csv(quadgram[quadgram$freq > 1,],"./swiftkey_mini/quadgram.csv",row.names=F)
+quadgram <- read.csv("./swiftkey_mini/quadgram.csv",stringsAsFactors = F)
+saveRDS(quadgram,"./swiftkey_mini/quadgram.RData")
+
+## Release object memory 
+rm(quadgram, quadgram_split)
+
+trigram <- data.frame(rows=rownames(tdm_3gram_df),count=tdm_3gram_df$Count)
+trigram$rows <- as.character(trigram$rows)
+trigram_split <- strsplit(as.character(trigram$rows),split=" ")
+trigram <- transform(trigram,first = sapply(trigram_split,"[[",1),second = sapply(trigram_split,"[[",2),third = sapply(trigram_split,"[[",3))
+trigram <- data.frame(unigram = trigram$first,bigram = trigram$second, trigram = trigram$third, freq = trigram$count,stringsAsFactors=FALSE)
+write.csv(trigram[trigram$freq > 1,],"./swiftkey_mini/trigram.csv",row.names=F)
+trigram <- read.csv("./swiftkey_mini/trigram.csv",stringsAsFactors = F)
+saveRDS(trigram,"./swiftkey_mini/trigram.RData")
+
+## Release object memory 
+rm(trigram, trigram_split)
+
+bigram <- data.frame(rows=rownames(tdm_2gram_df),count=tdm_2gram_df$Count)
+bigram$rows <- as.character(bigram$rows)
+bigram_split <- strsplit(as.character(bigram$rows),split=" ")
+bigram <- transform(bigram,first = sapply(bigram_split,"[[",1),second = sapply(bigram_split,"[[",2))
+bigram <- data.frame(unigram = bigram$first,bigram = bigram$second,freq = bigram$count,stringsAsFactors=FALSE)
+write.csv(bigram[bigram$freq > 1,],"./swiftkey_mini/bigram.csv",row.names=F)
+bigram <- read.csv("./swiftkey_mini/bigram.csv",stringsAsFactors = F)
+saveRDS(bigram,"./swiftkey_mini/bigram.RData")
+
+## Release object memory 
+rm(bigram, bigram_split) 
+rm(tdm_2gram_df, tdm_3gram_df, tdm_4gram_df)

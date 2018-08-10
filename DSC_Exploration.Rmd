@@ -1,0 +1,349 @@
+---
+title: "Data Science Capstone - Milestone Report"
+author: "Vasudevan Durairaj"
+date: "August 3, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+##Text mining and N-grams
+
+###Background 
+This report was designed as part of Data Science Capstone project in the field of Natural Language Processing. It would  demonstrate the data scientist's ability to process and analyze large volumes of unstructured text. 
+
+The Projects's final deliverable would be an algorithm that predicts the next word in a provided text with inputs from the test data set, similar to the predictive text functions found on today's modern smart phones.
+
+###About Dataset
+The Swiftkey dataset part of HC Corpora is comprised of the output of lots of news sites, blogs and twitter. The dataset contains 3 files across four languages (Russian, Finnish, German and English). This project will focus on the English language datasets. The names of the data files are as follows:
+
+1. en_US.blogs.txt
+2. en_US.twitter.txt
+3. en_US.news.txt
+
+and these will be referred to as "Blogs", "Twitter" and "News" for the remainder of this report
+
+###Tasks Performed on the data 
+1. Explore the training Data Set 
+2. Profanity Filtering - removing profanity and other words that don't want be included in the prediction model 
+3. Tokenization - identifying appropriate tokens such as words, punctuation and numbers 
+
+###Getting and Cleaning Data
+The Captstone training datasets for this project were downloaded from the below link
+
+<https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip>
+
+```{r eval=TRUE, cache=FALSE}
+## Code to download the file and unzip is hidden and its with the assumption that files are available in the current working directory 
+## Open the file connection 
+blogsC <- file("./final/en_US/en_US.blogs.txt", "r")
+newsC  <- file("./final/en_US/en_US.news.txt", "r")
+twitterC <- file("./final/en_US/en_US.twitter.txt", "r")
+
+blogs <- readLines(blogsC, n=-1, encoding = "UTF-8")
+news  <- readLines(newsC, n= -1, encoding = "UTF-8")
+twitter <- readLines(twitterC, n=-1, encoding = "UTF-8")
+
+## Close the file connection
+close(blogsC)
+close(newsC)
+close(twitterC)
+
+## compute no. of characters 
+nCharBlogs <- sum(nchar(blogs))
+nCharNews <- sum(nchar(news))
+nCharTwitter <- sum(nchar(twitter))
+
+## compute no. of lines 
+lenBlogs <- length(blogs)
+lenNews <- length(news)
+lentwitter <- length(twitter)
+
+## compute no. of words 
+nWordsBlogs <- sum(sapply(strsplit(blogs, " "), length))
+nWordsNews  <- sum(sapply(strsplit(news," "), length))
+nWordsTwitter <- sum(sapply(strsplit(twitter," "), length))
+
+## Build a Dataset Summary output Table 
+outputTable <- data.frame(c("blogs", "news", "twitter"),c(nCharBlogs,nCharNews, nCharTwitter), c(lenBlogs, lenNews, lentwitter), c(nWordsBlogs, nWordsNews, nWordsTwitter))
+colnames(outputTable) <- c("FileType", "Characters", "Lines", "Words")
+
+## Release object memory 
+rm(blogs, news, twitter)
+
+## Summary of Data Analysis                    
+outputTable
+```
+
+###Exploratory Analysis of Data 
+Since the training data set size is huge, a sample of each file is extracted and explored for further study 
+
+```{r cache=FALSE}
+## Set the line count information for extraction 
+linesToExtract <- 10000 
+
+## Open the file connection 
+blogsC <- file("./final/en_US/en_US.blogs.txt", "r")
+newsC  <- file("./final/en_US/en_US.news.txt", "r")
+twitterC <- file("./final/en_US/en_US.twitter.txt", "r")
+
+blogsS <- readLines(blogsC, n=linesToExtract, encoding = "UTF-8")
+newsS  <- readLines(newsC, n= linesToExtract, encoding = "UTF-8")
+twitterS <- readLines(twitterC, n=linesToExtract, encoding = "UTF-8")
+
+## Close the file connection
+close(blogsC)
+close(newsC)
+close(twitterC)
+
+## compute no. of characters 
+nCharBlogs <- sum(nchar(blogsS))
+nCharNews <- sum(nchar(newsS))
+nCharTwitter <- sum(nchar(twitterS))
+
+## compute no. of lines 
+lenBlogs <- length(blogsS)
+lenNews <- length(newsS)
+lentwitter <- length(twitterS)
+
+## compute no. of words 
+nWordsBlogs <- sum(sapply(strsplit(blogsS, " "), length))
+nWordsNews  <- sum(sapply(strsplit(newsS," "), length))
+nWordsTwitter <- sum(sapply(strsplit(twitterS," "), length))
+
+## Build a Dataset Summary output Table 
+sampleOutputTable <- data.frame(c("blogsSample", "newsSample", "twitterSample"),c(nCharBlogs,nCharNews, nCharTwitter), c(lenBlogs, lenNews, lentwitter), c(nWordsBlogs, nWordsNews, nWordsTwitter))
+colnames(sampleOutputTable) <- c("FileType", "Characters", "Lines", "Words")
+
+## Sample output summary table 
+sampleOutputTable
+```
+####Data Cleansing & Corpora building 
+The text sample extracted from each of the files is transformed step-by-step for Predictive Model bulding  
+
+```{r cache=FALSE}
+## Libraries to be loaded for Data Analysis 
+suppressMessages(library(NLP))
+suppressMessages(library(openNLP))
+suppressMessages(library(qdapDictionaries))
+suppressMessages(library(qdap))
+suppressMessages(library(qdapRegex))
+suppressMessages(library(qdapTools))
+suppressMessages(library(slam))
+suppressMessages(library(tm))
+suppressMessages(library(RWeka))
+suppressMessages(library(ngram))
+suppressMessages(library(stringr))
+suppressMessages(library(RColorBrewer))
+suppressMessages(library(SnowballC))
+suppressMessages(library(wordcloud))
+suppressMessages(library(ggplot2))
+suppressMessages(library(dplyr))
+
+## Collate Sample Text Data and create a reduced raw data file before processing 
+##beforeData <- c(blogsS, newsS, twitterS)
+beforeDF <- data.frame(text=c(blogsS, newsS, twitterS))
+beforeCorpora <- VCorpus(VectorSource(beforeDF))
+sampleTxtBP <- strwrap(head(beforeCorpora[[1]]$content,5))
+
+## Remove retweets from Twitter Data Sample 
+twitterS <- gsub ("(RT|via)((?:\\b\\W*@\\w+)+)", "", twitterS)
+
+## Remove @people names from Twitter 
+twitterS <- gsub("@\\w+", "",twitterS)
+
+## Collate text data from different file samples 
+sampleData <- c(blogsS, newsS, twitterS)
+
+## Replace abbreviation so that the sentences are not split at incorrect places
+sampleData <- replace_abbreviation(sampleData)
+
+## convert paragraphs to sentences 
+##endNotations <- c("?", ".", ",","!", "|", ":", "\n", "\r\n")
+##sampleData <- sent_detect (sampleData, endmarks = endNotations, rm.bracket = FALSE)
+
+## Collate Sample Text Data and create a reduced raw data file 
+sampleDF<- data.frame(text = sampleData)
+
+## Create Text Corpus for processing 
+sampleCorpora <- VCorpus(VectorSource(sampleDF))
+
+## Release object memory 
+rm(blogsS, newsS, twitterS)
+rm(beforeDF, beforeCorpora,sampleDF,sampleData)
+
+## convert the text to lower case 
+sampleCorpora <- tm_map(sampleCorpora,content_transformer(tolower))
+
+## Remove URL from Corpora
+removeOnlineJunk <- function(x) {
+    # replace emails and such but space
+    x <- gsub("[^ ]{1,}@[^ ]{1,}"," ",x)
+    x <- gsub(" @[^ ]{1,}"," ",x)
+    # hashtags
+    x <- gsub("#[^ ]{1,}"," ",x) 
+    # websites and file systems
+    x <- gsub("[^ ]{1,}://[^ ]{1,}"," ",x)
+}
+sampleCorpora <- tm_map(sampleCorpora,content_transformer(removeOnlineJunk))
+
+## Remove symbols
+removeSymbols <- function(x){
+    # Edit out most non-alphabetical character
+    # text must be lower case first
+    x <- gsub("[`'']","'",x)
+    x <- gsub("[^a-z']"," ",x)
+    x <- gsub("'{2,}"," '",x)
+    x <- gsub("' "," ",x)
+    x <- gsub(" '"," ",x)
+    x <- gsub(","," ",x)
+    x <- gsub("^'","",x)
+    x <- gsub("'$","",x)
+    x
+}
+sampleCorpora <- tm_map(sampleCorpora,content_transformer(removeSymbols))
+
+#remove the punctuations after trimming leading & trailing white spaces 
+sampleCorpora <- tm_map(sampleCorpora, content_transformer(removePunctuation))
+
+## remove numbers from the text 
+sampleCorpora <- tm_map(sampleCorpora, content_transformer(removeNumbers))
+
+## Build profane word list 
+profanityFileName = "profanity.txt"
+if (!file.exists(profanityFileName)) 
+download.file(url =  "http://www.cs.cmu.edu/~biglou/resources/bad-words.txt",destfile = profanityFileName)
+profC <- file("./profanity.txt", "r")
+profanityL<- readLines(profC, n=-1,encoding = "UTF-8")
+close(profC)
+
+## Remove profane words from the corpora 
+sampleCorpora <- tm_map(sampleCorpora, removeWords, profanityL)
+
+## Finally remove all the white space that was created by the removals
+sampleCorpora <- tm_map(sampleCorpora,content_transformer(stripWhitespace))
+
+## Sample Text Data after processing 
+sampleTxtAP <- strwrap(head(sampleCorpora[[1]]$content,5))
+
+```
+Please find below the first few lines of text data before and after processing in the Corpora 
+```{r cache = FALSE}
+## Before Text processing
+sampleTxtBP
+
+##After Text processing 
+sampleTxtAP
+
+## Release object memory 
+rm(sampleTxtBP, sampleTxtAP)
+```
+####Tokenization of text - Creation of N-grams 
+Perform Tokenization, and thus obtain one (uni-), two (bi-), three (tri-), and four (tetra-) word combinations that appear frequently in the Text Corpus.
+
+```{r cache=FALSE}
+strCorpus <- concatenate(lapply(sampleCorpora,"[",1))
+ng1 <- ngram(strCorpus, n=1)
+ng2 <- ngram(strCorpus, n=2)
+ng3 <- ngram(strCorpus, n=3)
+ng4 <- ngram(strCorpus, n=4)
+
+## Inspect first few entries in N-grams generated 
+head(get.phrasetable(ng1), 5)
+head(get.phrasetable(ng2), 5)
+head(get.phrasetable(ng3), 5)
+head(get.phrasetable(ng4), 5)
+```
+To make new sentence using the n-grams generated try babble(ng=ng2, genlen=15, seed= 123445) which would return a random formed 15 word length senetence.
+```{r cache=FALSE}
+## make new sentence
+babble(ng=ng2, genlen=15, seed= 12112345)
+```
+####Visual Inspection of tokenized words 
+Using the corpus of documents, we now construct a Document Term Matrix (DTM). This object is a simple triplet matrix structure (efficient for storing large sparse matrices), that has each document as a row and each n-gram (or term) as a column.
+
+```{r cache=FALSE}
+# Build Term document matrix with single tokenizer and words smaller than 3 characters are omitted 
+sampleTDM <- tm::TermDocumentMatrix(sampleCorpora, control = list(wordLengths = c(3,Inf)))
+
+#Put word count from TDM to data frame 
+sampleFreqWords <- data.frame(word = sampleTDM$dimnames$Terms, frequency = sampleTDM$v)
+
+## Reorder the word list in descending order 
+sampleFreqWords <- plyr::arrange(sampleFreqWords, -frequency)
+
+## Build Most frequent terms 
+n <- 25L # variable to set top n words
+# isolate top n words by decreasing frequency
+sampleFreqWords.top <- sampleFreqWords[1:n, ]
+# reorder levels so charts plot in order of frequency
+sampleFreqWords.top$word <- reorder(sampleFreqWords.top$word, sampleFreqWords.top$frequency)
+
+# plots
+g.sampleFreqWords.top <- ggplot(sampleFreqWords.top, aes(x = word, y = frequency))
+g.sampleFreqWords.top <- g.sampleFreqWords.top + geom_bar(stat = "identity") + coord_flip() + labs(title = "Most Frequent Terms based on Unigrams")
+g.sampleFreqWords.top
+
+# Plot a wordcloud of Unigrams
+wordcloud(sampleFreqWords.top$word, sampleFreqWords.top$frequency, max.words = 50)
+
+```
+
+###Next Steps Forward  - Prediction Algorithm
+Moving forward, the project goal is to develop a natural language prediction algorithm and app. For example, if a user were to type, "I want to go to the .", the app would suggest the three most likely words that would replace ".".
+
+####N-gram Dictionary
+While the word analysis performed in this document is helpful for initial exploration, the data analyst will need to construct a dictionary of bigrams, trigrams, and tetra-grams, collectively called n-grams. Bigrams are two word phrases, trigrams are three word phrases, and four-grams are four word phrases. Here is an example of trigrams from the randomly sampled corpus. Recall that stop words had been removed so the phrases may look choppy. In the final dictionary, stop phrases and words of any length will be maintained.
+
+```{r cache=FALSE}
+# tokenizer functions 
+UniGramTokenizer = function (corpus) {
+  NGramTokenizer (corpus, Weka_control (min = 1, max = 1))
+}
+
+BiGramTokenizer = function (corpus) {
+  NGramTokenizer (corpus, Weka_control (min = 2, max = 2))
+}
+
+TriGramTokenizer = function (corpus) {
+  NGramTokenizer (corpus, Weka_control (min = 3, max = 3))
+}
+
+TetraGramTokenizer = function (corpus) {
+  NGramTokenizer (corpus, Weka_control (min = 4, max = 4))
+}
+
+##sample Trigram analysis - Most frequent terms 
+trigram.sampleTDM <- tm::TermDocumentMatrix(sampleCorpora, control = list(tokenize = TriGramTokenizer))
+# put into data frame
+freq.trigram <- data.frame(word = trigram.sampleTDM$dimnames$Terms, frequency = trigram.sampleTDM$v)
+# reorder by descending frequency
+freq.trigram <- plyr::arrange(freq.trigram, -frequency)
+
+## Extract most frequent tri-grams 
+head(freq.trigram,25)
+
+# Plot a wordcloud of Trigrams
+wordcloud(freq.trigram$word, freq.trigram$frequency, max.words = 20)
+```
+
+####Predicting from N-grams
+Each n-gram will be split, separating the last word from the previous words in the n-gram.
+- bigrams will become unigram/unigram pairs
+- trigrams will become bigram/unigram pairs
+- four-grams will become trigram/unigram pairs
+
+For each pair, the three most frequent occurrences will be stored in the dictionary. Here are the three most frequent trigrams for a bigram of "cant wait" from the randomly sampled corpus. These eleven trigrams would be split into bigram/unigram pairs and stored in the sample dictionary. Dictionaries will be built for the whole data set
+
+```{r cache=FALSE}
+freq.trigram %>% filter(str_detect(freq.trigram$word,"^cant wait"))
+```
+
+####Application Logic 
+After the dictionaries have been established, an app will be developed allowing the user to enter text. The app will suggest the three most likely words to come next in the text for the text type, based on these rules.
+
+If the supplied text is greater than 2 words, take the last three words of the text and search the trigram/unigram pairs.
+If the supplied text is 2 words, take the two words and search the bigram/unigram pairs.
+If the supplied text is 1 word, search for that word in the unigram/unigram pairs.
+Suggest the three most frequent unigrams from the n-gram/unigram pair for either 1, 2, or 3 above.
